@@ -16,7 +16,7 @@ pip install -r requirements.txt
 # Bot Configuration
 * Create the bot with Telegram's [@BotFather](https://web.telegram.org/a/#93372553)
 * Configure the bot to disable privacy. This makes the bot receive other people's messages. We do not store them, though.
-* Add the bot to a group or channel. Note: A version of the bot which would delete OP messages would required admin privileges.
+* Add the bot to a group or channel. Note: A version of the bot which would delete OP messages would require admin privileges.
 * Get the token and try it out
 
 ```bash
