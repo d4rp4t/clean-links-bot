@@ -20,7 +20,7 @@ pip install -r requirements.txt
 * Get the token and try it out
 
 ```bash
-export TELEGRAM_BOT_TOKEN="TELEGRAM_BOT_TOKEN=123456:ABC-DEF-your-real-token"
+export TELEGRAM_BOT_TOKEN="123456:ABC-DEF-your-real-token"
 python clean_links_bot.py
 ```
 If it works, install.
