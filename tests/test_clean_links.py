@@ -1,4 +1,3 @@
-import pytest
 from telegram import MessageEntity
 
 from clean_links_bot import (
