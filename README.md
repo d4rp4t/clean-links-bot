@@ -16,11 +16,11 @@ pip install -r requirements.txt
 # Bot Configuration
 * Create the bot with Telegram's [@BotFather](https://web.telegram.org/a/#93372553)
 * Configure the bot to disable privacy. This makes the bot receive other people's messages. We do not store them, though.
-* Add the bot to a group or channel. Note: A version of the bot which would delete OP messages would required admin privileges.
+* Add the bot to a group or channel. Note: A version of the bot which would delete OP messages would require admin privileges.
 * Get the token and try it out
 
 ```bash
-export TELEGRAM_BOT_TOKEN="TELEGRAM_BOT_TOKEN=123456:ABC-DEF-your-real-token"
+export TELEGRAM_BOT_TOKEN="123456:ABC-DEF-your-real-token"
 python clean_links_bot.py
 ```
 If it works, install.
@@ -29,7 +29,7 @@ If it works, install.
 ```bash
 sudo useradd -r -s /bin/false bot
 sudo chown -R bot:bot ~/clean-links-bot
-sudo echo TELEGRAM_BOT_TOKEN=123456:ABC-DEF-your-real-token > /etc/clean-links-bot.env
+echo TELEGRAM_BOT_TOKEN=123456:ABC-DEF-your-real-token | sudo tee /etc/clean-links-bot.env > /dev/null
 sudo chmod 600 /etc/clean-links-bot.env
 
 sudo cp contrib/clean-links-bot.service /etc/systemd/system
