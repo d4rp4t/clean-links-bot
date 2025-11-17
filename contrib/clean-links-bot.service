@@ -1,0 +1,20 @@
+[Unit]
+Description=Telegram Clean Links Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bot
+WorkingDirectory=/home/bot/clean-links-bot
+EnvironmentFile=/etc/clean-links-bot.env
+ExecStart=/home/bot/clean-links-bot/.venv/bin/python clean_links_bot.py
+Restart=on-failure
+RestartSec=5
+
+# Optional: slightly nicer logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
