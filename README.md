@@ -29,7 +29,7 @@ If it works, install.
 ```bash
 sudo useradd -r -s /bin/false bot
 sudo chown -R bot:bot ~/clean-links-bot
-sudo echo TELEGRAM_BOT_TOKEN=123456:ABC-DEF-your-real-token > /etc/clean-links-bot.env
+echo TELEGRAM_BOT_TOKEN=123456:ABC-DEF-your-real-token | sudo tee /etc/clean-links-bot.env > /dev/null
 sudo chmod 600 /etc/clean-links-bot.env
 
 sudo cp contrib/clean-links-bot.service /etc/systemd/system
