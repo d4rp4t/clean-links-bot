@@ -2,6 +2,7 @@ import os
 import logging
 import random
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
+from collections import deque
 
 from telegram import Update, MessageEntity
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
@@ -12,6 +13,8 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+
+BOT_VERSION = "0.0.1"
 
 FUNNY_INTROS = [
     "🪲 Użyłem sprayu na wścibskie pluskwy",
@@ -26,6 +29,14 @@ FUNNY_INTROS = [
     "🗑️  Wyrzuciłem śledzące robaczki do kosza",
 ]
 
+DEDUP_CACHE_SIZE = 10
+processed_queue = deque(maxlen=DEDUP_CACHE_SIZE)
+
+def is_new_message(mid):
+    if mid in processed_queue:
+        return False
+    processed_queue.append(mid)
+    return True
 
 # ------------ URL CLEANING LOGIC ------------ #
 
@@ -112,6 +123,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if message is None:
         return
 
+    # Deduplication
+    mid = getattr(message, "message_id", None)
+    if mid is not None and not is_new_message(mid):
+        logger.info(f"Already processed message_id {mid}, skipping.")
+        return
+
     # Avoid reacting to our own messages
     if message.from_user and message.from_user.is_bot:
         return
@@ -184,8 +201,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def ping(update, context):
-    await update.effective_message.reply_text("pong")
+    await update.effective_message.reply_text(f"pong (Wersja {BOT_VERSION})")
 
+async def help_command(update, context):
+    HELP_TEXT = (
+        "🤖 *Pomoc Clean Links Bot*\n\n"
+        "Ten bot skanuje wiadomości pod kątem linków do YouTube oraz Twitter/X i usuwa z nich zbędne lub śledzące parametry.\n"
+        "Jeśli link da się oczyścić, bot odpowiada w wątku z oczyszczoną wersją oraz zabawnym intro.\n\n"
+        "*Komendy:*\n"
+        "/ping – Sprawdź czy bot żyje i poznaj jego wersję\n"
+        "/help – Wyświetl tę pomoc\n\n"
+        "*Jak działa bot:*\n"
+        "- Działa tylko na czatach grupowych\n"
+        "- Automatycznie odpowiada, jeśli wykryje możliwy do poprawienia link do YouTube lub Twitter/X\n"
+        "- Podaje autora oryginalnej wiadomości\n"
+        "- Używa pamięci podręcznej, by nie odpowiadać dwa razy na ten sam komunikat\n"
+    )
+    await update.effective_message.reply_text(HELP_TEXT, parse_mode="Markdown")
 
 def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -195,6 +227,7 @@ def main():
     app = ApplicationBuilder().token(token).build()
 
     app.add_handler(CommandHandler("ping", ping))
+    app.add_handler(CommandHandler("help", help_command))
 
     app.add_handler(
         MessageHandler(
