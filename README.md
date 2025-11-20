@@ -1,5 +1,5 @@
 # clean-links-bot
-Bot to clean up twitter and youtube links from Telegram Groups and Channels
+Bot to clean up Twitter and YouTube links from Telegram Groups and Channels
 
 # Setup
 ```bash
@@ -20,7 +20,7 @@ pip install -r requirements.txt
 * Get the token and try it out
 
 ```bash
-export TELEGRAM_BOT_TOKEN="123456:ABC-DEF-your-real-token"
+export TELEGRAM_BOT_TOKEN="REPLACE_ME_WITH_YOUR_TOKEN"
 python clean_links_bot.py
 ```
 If it works, install.
@@ -28,8 +28,8 @@ If it works, install.
 # Installation as a service
 ```bash
 sudo useradd -r -s /bin/false bot
-sudo chown -R bot:bot ~/clean-links-bot
-echo TELEGRAM_BOT_TOKEN=123456:ABC-DEF-your-real-token | sudo tee /etc/clean-links-bot.env > /dev/null
+sudo chown -R bot:bot /path/to/clean-links-bot
+echo TELEGRAM_BOT_TOKEN=REPLACE_ME_WITH_YOUR_TOKEN | sudo tee /etc/clean-links-bot.env > /dev/null
 sudo chmod 600 /etc/clean-links-bot.env
 
 sudo cp contrib/clean-links-bot.service /etc/systemd/system
