@@ -17,6 +17,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def sanitize_log_value(s: str) -> str:
+    """Sanitize string for safe logging: remove newlines and carriage returns."""
+    if not isinstance(s, str):
+        s = str(s)
+    return s.replace('\r\n', '').replace('\n', '').replace('\r', '')
 BOT_VERSION = "0.0.2"
 
 # Per-chat config: whether to delete original messages
@@ -70,7 +75,7 @@ def load_config() -> None:
     global DELETE_ORIGINAL_BY_CHAT
 
     if not CONFIG_FILE.is_file():
-        logger.info("Config file %s not found, starting with defaults.", CONFIG_FILE)
+        logger.info("Config file %s not found, starting with defaults.", sanitize_log_value(CONFIG_FILE))
         DELETE_ORIGINAL_BY_CHAT = {}
         return
 
@@ -82,9 +87,9 @@ def load_config() -> None:
         # JSON keys are strings → convert to int
         DELETE_ORIGINAL_BY_CHAT = {int(k): bool(v) for k, v in raw.items()}
 
-        logger.info("Loaded config from %s: %s", CONFIG_FILE, DELETE_ORIGINAL_BY_CHAT)
+        logger.info("Loaded config from %s: %s", sanitize_log_value(CONFIG_FILE), DELETE_ORIGINAL_BY_CHAT)
     except Exception as e:
-        logger.warning("Failed to load config from %s: %s", CONFIG_FILE, e)
+        logger.warning("Failed to load config from %s: %s", sanitize_log_value(CONFIG_FILE), e)
         DELETE_ORIGINAL_BY_CHAT = {}
 
 
@@ -103,9 +108,9 @@ def save_config() -> None:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
         tmp.replace(CONFIG_FILE)
-        logger.info("Saved config to %s", CONFIG_FILE)
+        logger.info("Saved config to %s", sanitize_log_value(CONFIG_FILE))
     except Exception as e:
-        logger.warning("Failed to save config to %s: %s", CONFIG_FILE, e)
+        logger.warning("Failed to save config to %s: %s", sanitize_log_value(CONFIG_FILE), e)
 
 def clean_youtube(url: str) -> str:
     parsed = urlparse(url)
