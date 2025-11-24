@@ -1,6 +1,9 @@
 import os
 import logging
 import random
+import json
+from pathlib import Path
+
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 from collections import deque
 
@@ -14,7 +17,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_VERSION = "0.0.1"
+BOT_VERSION = "0.0.2"
+
+# Per-chat config: whether to delete original messages
+DELETE_ORIGINAL_BY_CHAT: dict[int, bool] = {}
+CONFIG_FILE = Path(os.environ.get("CLEANLINKS_CONFIG_FILE", "cleanlinks_config.json"))
 
 FUNNY_INTROS = [
     "🪲 Użyłem sprayu na wścibskie pluskwy",
@@ -58,6 +65,47 @@ TWITTER_HOSTS = {
 # For YouTube, we keep only parameters that actually affect video playback.
 YOUTUBE_ALLOWED_PARAMS = {"v", "t", "time_continue", "list", "index"}
 
+def load_config() -> None:
+    """Load per-chat config from JSON file (if it exists)."""
+    global DELETE_ORIGINAL_BY_CHAT
+
+    if not CONFIG_FILE.is_file():
+        logger.info("Config file %s not found, starting with defaults.", CONFIG_FILE)
+        DELETE_ORIGINAL_BY_CHAT = {}
+        return
+
+    try:
+        with CONFIG_FILE.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        raw = data.get("delete_original_by_chat", {})
+        # JSON keys are strings → convert to int
+        DELETE_ORIGINAL_BY_CHAT = {int(k): bool(v) for k, v in raw.items()}
+
+        logger.info("Loaded config from %s: %s", CONFIG_FILE, DELETE_ORIGINAL_BY_CHAT)
+    except Exception as e:
+        logger.warning("Failed to load config from %s: %s", CONFIG_FILE, e)
+        DELETE_ORIGINAL_BY_CHAT = {}
+
+
+def save_config() -> None:
+    """Save per-chat config to JSON file (atomic write)."""
+    try:
+        data = {
+            "delete_original_by_chat": {
+                str(chat_id): bool(flag)
+                for chat_id, flag in DELETE_ORIGINAL_BY_CHAT.items()
+            }
+        }
+
+        tmp = CONFIG_FILE.with_suffix(CONFIG_FILE.suffix + ".tmp")
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        tmp.replace(CONFIG_FILE)
+        logger.info("Saved config to %s", CONFIG_FILE)
+    except Exception as e:
+        logger.warning("Failed to save config to %s: %s", CONFIG_FILE, e)
 
 def clean_youtube(url: str) -> str:
     parsed = urlparse(url)
@@ -185,20 +233,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif user.full_name:
             author = user.full_name
         else:
-            author = "anon"
+            author = "ktoś"
     else:
-        author = "anon"
+        author = "ktoś"
 
     intro = random.choice(FUNNY_INTROS)
+    final_text = f"{intro}\nOd {author}\n{cleaned_text}"
 
-    final_text = f"{intro}\nOd {author}:\n{cleaned_text}"
+    # ---- Per-chat behavior: delete original or not ----
+    delete_original = DELETE_ORIGINAL_BY_CHAT.get(message.chat_id, False)
 
-    # Reply to the original message (don’t delete it)
-    await context.bot.send_message(
-        chat_id=message.chat_id,
-        text=final_text,
-        reply_to_message_id=message.message_id,
-    )
+    if delete_original:
+        # Try to delete original, then post cleaned as a fresh message
+        try:
+            await message.delete()
+        except Exception as e:
+            logger.warning("Failed to delete message: %s", e)
+
+        await context.bot.send_message(
+            chat_id=message.chat_id,
+            text=final_text,
+        )
+    else:
+        # Default: keep original and reply with cleaned version
+        await context.bot.send_message(
+            chat_id=message.chat_id,
+            text=final_text,
+            reply_to_message_id=message.message_id,
+        )
+
 
 async def ping(update, context):
     await update.effective_message.reply_text(f"pong (Wersja {BOT_VERSION})")
@@ -219,15 +282,68 @@ async def help_command(update, context):
     )
     await update.effective_message.reply_text(HELP_TEXT, parse_mode="Markdown")
 
+async def set_delete_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    user = update.effective_user
+
+    # This command only makes sense in groups
+    if not chat or chat.type not in ("group", "supergroup"):
+        await update.effective_message.reply_text(
+            "Tę komendę możesz użyć tylko w grupie."
+        )
+        return
+
+    # Only admins can change the setting
+    member = await context.bot.get_chat_member(chat.id, user.id)
+    if member.status not in ("administrator", "creator", "owner"):
+        await update.effective_message.reply_text(
+            "Tylko administratorzy tej grupy mogą zmieniać ten tryb."
+        )
+        return
+
+    # Expect one argument: on/off (true/false/1/0 etc.)
+    if not context.args:
+        current = DELETE_ORIGINAL_BY_CHAT.get(chat.id, False)
+        mode_txt = "włączone" if current else "wyłączone"
+        await update.effective_message.reply_text(
+            f"Usuwanie oryginalnych wiadomości jest teraz: {mode_txt}.\n"
+            "Użyj: /cleanlinks_delete on lub /cleanlinks_delete off"
+        )
+        return
+
+    arg = context.args[0].lower()
+    if arg in ("on", "true", "1", "yes", "tak"):
+        DELETE_ORIGINAL_BY_CHAT[chat.id] = True
+        save_config()
+        await update.effective_message.reply_text(
+            "OK, od teraz będę USUWAŁ oryginalne wiadomości po wyczyszczeniu linków."
+        )
+    elif arg in ("off", "false", "0", "no", "nie"):
+        DELETE_ORIGINAL_BY_CHAT[chat.id] = False
+        save_config()
+        await update.effective_message.reply_text(
+            "OK, od teraz NIE będę usuwał oryginalnych wiadomości – tylko odpowiadam czystą wersją."
+        )
+    else:
+        await update.effective_message.reply_text(
+            "Nie rozumiem. Użyj: /cleanlinks_delete on lub /cleanlinks_delete off"
+        )
+
 def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         raise RuntimeError("Please set TELEGRAM_BOT_TOKEN env variable.")
 
+    # Load persisted config
+    load_config()
+
     app = ApplicationBuilder().token(token).build()
 
     app.add_handler(CommandHandler("ping", ping))
     app.add_handler(CommandHandler("help", help_command))
+
+    # Command to configure delete mode (admins only)
+    app.add_handler(CommandHandler("cleanlinks_delete", set_delete_mode))
 
     app.add_handler(
         MessageHandler(
