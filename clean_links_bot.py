@@ -3,9 +3,11 @@ import logging
 import random
 import json
 from pathlib import Path
+import time
 
-from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
+from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse, ParseResult
 from collections import deque
+from asyncio import Lock
 
 from telegram import Update, MessageEntity
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
@@ -41,14 +43,32 @@ FUNNY_INTROS = [
     "🗑️  Wyrzuciłem śledzące robaczki do kosza",
 ]
 
-DEDUP_CACHE_SIZE = 10
-processed_queue = deque(maxlen=DEDUP_CACHE_SIZE)
+DEDUP_CACHE_SIZE = 100
+DEDUP_EXPIRY_SECONDS = 60
 
-def is_new_message(mid):
-    if mid in processed_queue:
-        return False
-    processed_queue.append(mid)
-    return True
+processed_messages_queue = deque(maxlen=DEDUP_CACHE_SIZE) # {mid: timestamp}
+processed_messages_set = set()
+dedup_lock = Lock()
+
+
+async def is_new_message(chat_id: int, mid: int) -> bool:
+    async with dedup_lock:
+        current_time = time.time()
+
+        while processed_messages_queue and current_time - processed_messages_queue[0][2] > DEDUP_EXPIRY_SECONDS:
+            old_entry = processed_messages_queue.popleft()
+            processed_messages_set.discard((old_entry[0], old_entry[1]))
+
+        key = (chat_id, mid)
+        if key in processed_messages_set:
+            logger.info(f"Dedup: Message already processed: chat={chat_id}, msg_id={mid}. SKIP.")
+            return False
+
+        processed_messages_queue.append((chat_id, mid, current_time))
+        processed_messages_set.add(key)
+
+        logger.info(f"Dedup: New message accepted: chat={chat_id}, msg_id={mid}")
+        return True
 
 # ------------ URL CLEANING LOGIC ------------ #
 
@@ -112,9 +132,7 @@ def save_config() -> None:
     except Exception as e:
         logger.warning("Failed to save config to %s: %s", sanitize_log_value(CONFIG_FILE), e)
 
-def clean_youtube(url: str) -> str:
-    parsed = urlparse(url)
-
+def clean_youtube(parsed: ParseResult) -> str:
     # Short links like https://youtu.be/VIDEOID?t=123&si=...
     if parsed.netloc in {"youtu.be"}:
         query = parse_qsl(parsed.query, keep_blank_values=True)
@@ -132,8 +150,7 @@ def clean_youtube(url: str) -> str:
     return urlunparse(parsed._replace(query=new_query))
 
 
-def clean_twitter(url: str) -> str:
-    parsed = urlparse(url)
+def clean_twitter(parsed: ParseResult) -> str:
     # For Twitter/X, we can safely drop all query params (they're mostly tracking)
     return urlunparse(parsed._replace(query=""))
 
@@ -147,9 +164,9 @@ def clean_url(url: str) -> str:
     host = parsed.netloc.lower()
 
     if host in YOUTUBE_HOSTS:
-        return clean_youtube(url)
+        return clean_youtube(parsed)
     if host in TWITTER_HOSTS:
-        return clean_twitter(url)
+        return clean_twitter(parsed)
 
     # Not YouTube or Twitter/X -> leave unchanged
     return url
@@ -173,12 +190,14 @@ def extract_urls(text: str, entities: list[MessageEntity]) -> list[tuple[str, Me
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
+    chat_id = update.effective_chat.id
     if message is None:
+        logger.info("handle_message: no message, wtf.")
         return
 
     # Deduplication
     mid = getattr(message, "message_id", None)
-    if mid is not None and not is_new_message(mid):
+    if mid is not None and not await is_new_message(chat_id, mid):
         logger.info(f"Already processed message_id {mid}, skipping.")
         return
 
@@ -190,7 +209,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         return
 
-    entities = message.entities or message.caption_entities or []
+    entities = message.parse_entities(types=[MessageEntity.URL, MessageEntity.TEXT_LINK])
     url_entities = extract_urls(text, entities)
 
     if not url_entities:
@@ -207,20 +226,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Build cleaned text by replacing URLs (only for URL entities)
     cleaned_text = text
-    for original_url, ent in sorted(url_entities, key=lambda x: x[1].offset, reverse=True):
-        if ent.type == MessageEntity.URL:
-            cleaned = cleaned_mapping.get(original_url, original_url)
-            cleaned_text = (
-                cleaned_text[: ent.offset]
-                + cleaned
-                + cleaned_text[ent.offset + ent.length :]
-            )
 
-    # TEXT_LINK entities: append cleaned versions at the end
+    urls_to_replace = [
+        (orig, ent)
+        for orig, ent in url_entities
+        if ent.type == MessageEntity.URL and orig in cleaned_mapping
+    ]
+
+    for original_url, ent in sorted(urls_to_replace, key=lambda x: x[1].offset, reverse=True):
+        cleaned = cleaned_mapping[original_url]
+        cleaned_text = (
+            cleaned_text[:ent.offset]
+            + cleaned
+            + cleaned_text[ent.offset + ent.length:]
+        )
+
     extra_cleaned_links = [
-        v
-        for (orig, ent) in url_entities
-        if ent.type == MessageEntity.TEXT_LINK and (v := cleaned_mapping.get(orig))
+        cleaned_mapping[orig]
+        for orig, ent in url_entities
+        if ent.type == MessageEntity.TEXT_LINK and orig in cleaned_mapping
     ]
 
     if extra_cleaned_links:
@@ -232,15 +256,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ---- Attribution with funny intro ----
     user = message.from_user
-    if user:
-        if user.username:
-            author = f"@{user.username}"
-        elif user.full_name:
-            author = user.full_name
-        else:
-            author = "ktoś"
-    else:
-        author = "ktoś"
+    author = (
+        f"@{user.username}" if user and user.username
+        else user.full_name if user and user.full_name
+        else "ktoś"
+    )
 
     intro = random.choice(FUNNY_INTROS)
     final_text = f"{intro}\nOd {author}\n{cleaned_text}"
@@ -352,7 +372,7 @@ def main():
 
     app.add_handler(
         MessageHandler(
-            filters.ChatType.GROUPS & (filters.TEXT | filters.CAPTION),
+            filters.ChatType.GROUPS & (filters.TEXT | filters.CAPTION) & ~filters.COMMAND,
             handle_message,
         )
     )

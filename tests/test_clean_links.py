@@ -1,8 +1,6 @@
 from telegram import MessageEntity
 
 from clean_links_bot import (
-    clean_youtube,
-    clean_twitter,
     clean_url,
     extract_urls,
     YOUTUBE_ALLOWED_PARAMS,
@@ -11,7 +9,7 @@ from clean_links_bot import (
 
 def test_youtube_short_link_strips_si():
     url = "https://youtu.be/ko70cExuzZM?si=yO4tqv9f73N1pCUp"
-    cleaned = clean_youtube(url)
+    cleaned = clean_url(url)
     assert cleaned == "https://youtu.be/ko70cExuzZM"
 
 
@@ -23,7 +21,7 @@ def test_youtube_strips_tracking_params():
         "&utm_source=foo"
         "&fbclid=XYZ"
     )
-    cleaned = clean_youtube(url)
+    cleaned =  clean_url(url)
 
     # Only allowed params should remain
     assert "v=dQw4w9WgXcQ" in cleaned
@@ -46,7 +44,7 @@ def test_youtube_preserves_timestamp_and_playlist():
         "&list=PL123"
         "&index=5"
     )
-    cleaned = clean_youtube(url)
+    cleaned = clean_url(url)
 
     assert "v=dQw4w9WgXcQ" in cleaned
     assert "t=120" in cleaned
@@ -56,7 +54,7 @@ def test_youtube_preserves_timestamp_and_playlist():
 
 def test_youtube_short_link_keeps_t():
     url = "https://youtu.be/dQw4w9WgXcQ?t=42&utm_source=foo"
-    cleaned = clean_youtube(url)
+    cleaned = clean_url(url)
 
     assert cleaned.startswith("https://youtu.be/dQw4w9WgXcQ")
     assert "t=42" in cleaned
@@ -65,7 +63,7 @@ def test_youtube_short_link_keeps_t():
 
 def test_twitter_strips_all_params():
     url = "https://x.com/user/status/1234567890?s=20&t=ABCDEFG"
-    cleaned = clean_twitter(url)
+    cleaned = clean_url(url)
 
     # Base path should remain
     assert cleaned.startswith("https://x.com/user/status/1234567890")
